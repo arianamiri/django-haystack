@@ -349,6 +349,12 @@ class SearchIndex(with_metaclass(DeclarativeMetaclass, threading.local)):
         """
         return self.get_model()._default_manager.all()
 
+    def pre_process_data(self, queryset):
+        """
+        Will allow an "index" to do some preprocessing of the data in it's slice
+        before the actual data is indexed
+        """
+
 
 class BasicSearchIndex(SearchIndex):
     text = CharField(document=True, use_template=True)
