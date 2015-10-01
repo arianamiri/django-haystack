@@ -30,11 +30,16 @@ except ImportError:
     from datetime import datetime
     now = datetime.now
 
+from timeit import default_timer
 
 DEFAULT_BATCH_SIZE = None
 DEFAULT_AGE = None
 APP = 'app'
 MODEL = 'model'
+
+
+def print_regular(message):
+    print('[Haystack] %s' % message)
 
 
 def worker(bits):
@@ -83,9 +88,9 @@ def do_update(backend, index, qs, start, end, total, verbosity=1):
 
     if verbosity >= 2:
         if hasattr(os, 'getppid') and os.getpid() == os.getppid():
-            print("  indexed %s - %d of %d." % (start + 1, end, total))
+            print("  indexing %s - %d of %d" % (start + 1, end, total))
         else:
-            print("  indexed %s - %d of %d (by %s)." % (start + 1, end, total, os.getpid()))
+            print("  indexing %s - %d of %d (by %s)" % (start + 1, end, total, os.getpid()))
 
     # FIXME: Get the right backend.
     backend.update(index, current_qs)
@@ -210,6 +215,10 @@ class Command(LabelCommand):
                     print("Skipping '%s' - no index." % model)
                 continue
 
+            if self.verbosity >= 1:
+                print_regular('Updating backend for: %s' % model._meta.verbose_name_plural)
+                time_start_model = default_timer()
+
             if self.workers > 0:
                 # workers resetting connections leads to references to models / connections getting
                 # stale and having their connection disconnected from under them. Resetting before
@@ -273,3 +282,7 @@ class Command(LabelCommand):
                     pool = multiprocessing.Pool(self.workers)
                     pool.map(worker, ghetto_queue)
                     pool.terminate()
+
+            if self.verbosity >= 1:
+                time_end_model = default_timer()
+                print_regular('Finished updating backend for %s. It took: %2.2fs total.\n' % (model._meta.verbose_name_plural, time_end_model - time_start_model))
