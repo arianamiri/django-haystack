@@ -155,6 +155,13 @@ class SearchIndex(with_metaclass(DeclarativeMetaclass, threading.local)):
         update_field_msg = ("No updated date field found for '%s' "
                             "- not restricting by age.") % model.__name__
 
+        # print '======================'
+        # print 'build_queryset params:'
+        # print '----------------------'
+        # print 'start_date', start_date
+        # print 'updated_field', updated_field
+        # print '======================'
+
         if start_date:
             if updated_field:
                 extra_lookup_kwargs['%s__gte' % updated_field] = start_date
@@ -180,7 +187,7 @@ class SearchIndex(with_metaclass(DeclarativeMetaclass, threading.local)):
 
         # `.select_related()` seems like a good idea here but can fail on
         # nullable `ForeignKey` as well as what seems like other cases.
-        return index_qs.filter(**extra_lookup_kwargs).order_by(model._meta.pk.name)
+        return index_qs.filter(**extra_lookup_kwargs)
 
     def prepare(self, obj):
         """

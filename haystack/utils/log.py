@@ -22,3 +22,9 @@ class LoggingFacade(object):
         if getattr(settings, 'HAYSTACK_LOGGING', True):
             return getattr(self.real_logger, attr)
         return self.noop
+
+def print_regular(message):
+    print('[Haystack] %s' % message)
+
+def print_timing(method_name, elapsed):
+    print_regular('%s [%2.3fs]' % (method_name, elapsed))

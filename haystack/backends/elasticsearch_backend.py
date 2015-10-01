@@ -25,6 +25,7 @@ try:
 except ImportError:
     raise MissingDependency("The 'elasticsearch' backend requires the installation of 'elasticsearch'. Please refer to the documentation.")
 
+from timeit import default_timer
 
 DATETIME_REGEX = re.compile(
     r'^(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2})T'
@@ -146,7 +147,7 @@ class ElasticsearchSearchBackend(BaseSearchBackend):
 
         self.setup_complete = True
 
-    def update(self, index, iterable, commit=True):
+    def update(self, index, iterable, commit=True, verbosity=1):
         if not self.setup_complete:
             try:
                 self.setup()
@@ -158,6 +159,9 @@ class ElasticsearchSearchBackend(BaseSearchBackend):
                 return
 
         prepped_docs = []
+
+        if verbosity >= 3:
+            time_start = default_timer()
 
         for obj in iterable:
             try:
@@ -184,7 +188,18 @@ class ElasticsearchSearchBackend(BaseSearchBackend):
                     }
                 })
 
+
+        if verbosity >= 3:
+            time_end = default_timer()
+            logging.print_timing('Prep', time_end - time_start)
+
+            time_start2 = default_timer()
+
         bulk_index(self.conn, prepped_docs, index=self.index_name, doc_type='modelresult')
+
+        if verbosity >= 3:
+            time_end2 = default_timer()
+            logging.print_timing('Indexing', time_end2 - time_start2)
 
         if commit:
             self.conn.indices.refresh(index=self.index_name)

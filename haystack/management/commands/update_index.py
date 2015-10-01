@@ -30,6 +30,8 @@ except ImportError:
     from datetime import datetime
     now = datetime.now
 
+from haystack.utils import log
+from timeit import default_timer
 
 DEFAULT_BATCH_SIZE = None
 DEFAULT_AGE = None
@@ -82,13 +84,20 @@ def do_update(backend, index, qs, start, end, total, verbosity=1):
     index.pre_process_data(current_qs)
 
     if verbosity >= 2:
-        if hasattr(os, 'getppid') and os.getpid() == os.getppid():
-            print("  indexed %s - %d of %d." % (start + 1, end, total))
+        if (hasattr(os, 'getppid') and os.getpid() == os.getppid()) or verbosity < 3:
+            print("  indexing %s - %d of %d" % (start + 1, end, total))
         else:
-            print("  indexed %s - %d of %d (by %s)." % (start + 1, end, total, os.getpid()))
+            print("  indexing %s - %d of %d (by %s)" % (start + 1, end, total, os.getpid()))
+
+    # time_precache_start = default_timer()
+    # current_qs = list(current_qs)
+    # time_precache_end = default_timer()
+
+    if verbosity >= 3:
+        log.print_timing('Precache', time_precache_end - time_precache_start)
 
     # FIXME: Get the right backend.
-    backend.update(index, current_qs)
+    backend.update(index, current_qs, True, verbosity)
 
     # Clear out the DB connections queries because it bloats up RAM.
     reset_queries()
@@ -206,9 +215,13 @@ class Command(LabelCommand):
             try:
                 index = unified_index.get_index(model)
             except NotHandled:
-                if self.verbosity >= 2:
+                if self.verbosity >= 4:
                     print("Skipping '%s' - no index." % model)
                 continue
+
+            if self.verbosity >= 1:
+                log.print_regular('Updating backend for: %s' % model._meta.verbose_name_plural)
+                time_start_model = default_timer()
 
             if self.workers > 0:
                 # workers resetting connections leads to references to models / connections getting
@@ -273,3 +286,7 @@ class Command(LabelCommand):
                     pool = multiprocessing.Pool(self.workers)
                     pool.map(worker, ghetto_queue)
                     pool.terminate()
+
+            if self.verbosity >= 1:
+                time_end_model = default_timer()
+                log.print_regular('Finished updating backend for %s. It took: %2.2fs total.\n' % (model._meta.verbose_name_plural, time_end_model - time_start_model))
