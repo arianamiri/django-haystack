@@ -79,6 +79,8 @@ def do_update(backend, index, qs, start, end, total, verbosity=1):
     small_cache_qs = qs.all()
     current_qs = small_cache_qs[start:end]
 
+    index.pre_process_data(current_qs)
+
     if verbosity >= 2:
         if hasattr(os, 'getppid') and os.getpid() == os.getppid():
             print("  indexed %s - %d of %d." % (start + 1, end, total))
