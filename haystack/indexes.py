@@ -351,7 +351,7 @@ class SearchIndex(with_metaclass(DeclarativeMetaclass, threading.local)):
 
     def pre_process_data(self, queryset):
         """
-        Will allow an "index" to do some preprocessing of the data in it's slice
+        Will allow an "index" to do some preprocessing of the data in its slice
         before the actual data is indexed
         """
 
