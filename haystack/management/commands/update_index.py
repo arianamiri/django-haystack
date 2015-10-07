@@ -84,15 +84,14 @@ def do_update(backend, index, qs, start, end, total, verbosity=1):
     index.pre_process_data(current_qs)
 
     if verbosity >= 2:
-        if (hasattr(os, 'getppid') and os.getpid() == os.getppid()) or verbosity < 3:
+        if (hasattr(os, 'getppid') and os.getpid() == os.getppid()) or verbosity == 2:
             print("  indexing %s - %d of %d" % (start + 1, end, total))
         else:
             print("  indexing %s - %d of %d (by %s)" % (start + 1, end, total, os.getpid()))
 
-    # time_precache_start = default_timer()
-    # current_qs = list(current_qs)
-    # time_precache_end = default_timer()
-
+    time_precache_start = default_timer()
+    current_qs = list(current_qs)
+    time_precache_end = default_timer()
     if verbosity >= 3:
         log.print_timing('Precache', time_precache_end - time_precache_start)
 
