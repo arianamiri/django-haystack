@@ -188,16 +188,17 @@ class ElasticsearchSearchBackend(BaseSearchBackend):
                     }
                 })
 
-
         if verbosity >= 3:
             time_end = default_timer()
-            logging.print_timing('Prep', time_end - time_start)
+            elapsed = time_end - time_start
+            logging.get_counter().add('prep', elapsed)
+            logging.print_timing('Prep', elapsed)
 
             time_start2 = default_timer()
 
         bulk_index(self.conn, prepped_docs, index=self.index_name, doc_type='modelresult')
 
-        if verbosity >= 3:
+        if verbosity >= 4:
             time_end2 = default_timer()
             logging.print_timing('Indexing', time_end2 - time_start2)
 

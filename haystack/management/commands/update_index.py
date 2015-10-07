@@ -1,7 +1,9 @@
 # encoding: utf-8
 from __future__ import absolute_import, print_function, unicode_literals
+from itertools import imap
 
 import logging
+from operator import itemgetter
 import os
 from datetime import timedelta
 from optparse import make_option
@@ -70,7 +72,7 @@ def worker(bits):
 
     if func == 'do_update':
         qs = index.build_queryset(start_date=start_date, end_date=end_date)
-        do_update(backend, index, qs, start, end, total, verbosity=verbosity)
+        return do_update(backend, index, qs, start, end, total, verbosity=verbosity)
     elif bits[0] == 'do_remove':
         do_remove(backend, index, model, pks_seen, start, upper_bound, verbosity=verbosity)
 
@@ -80,26 +82,41 @@ def do_update(backend, index, qs, start, end, total, verbosity=1):
     # in memory. Useful when reindexing large amounts of data.
     small_cache_qs = qs.all()
     current_qs = small_cache_qs[start:end]
+    timing = {
+        'prep': 0,
+        'precache': 0
+    }
 
     index.pre_process_data(current_qs)
 
     if verbosity >= 2:
-        if (hasattr(os, 'getppid') and os.getpid() == os.getppid()) or verbosity == 2:
-            print("  indexing %s - %d of %d" % (start + 1, end, total))
+        if (hasattr(os, 'getppid') and os.getpid() == os.getppid()):
+            print("    indexing %s - %d of %d" % (start + 1, end, total))
         else:
-            print("  indexing %s - %d of %d (by %s)" % (start + 1, end, total, os.getpid()))
+            print("    indexing %s - %d of %d (by %s)" % (start + 1, end, total, os.getpid()))
 
     time_precache_start = default_timer()
     current_qs = list(current_qs)
     time_precache_end = default_timer()
+    elapsed = time_precache_end - time_precache_start
+    log.get_counter().add('precache', elapsed)
+    timing['precache'] = elapsed
     if verbosity >= 3:
-        log.print_timing('Precache', time_precache_end - time_precache_start)
+        log.print_timing('Precache', elapsed)
+
+    time_start_prep = default_timer()
 
     # FIXME: Get the right backend.
     backend.update(index, current_qs, True, verbosity)
 
+    time_end_prep = default_timer()
+    elapsed = time_end_prep - time_start_prep
+    timing['prep'] = elapsed
+
     # Clear out the DB connections queries because it bloats up RAM.
     reset_queries()
+
+    return timing
 
 
 def do_remove(backend, index, model, pks_seen, start, upper_bound, verbosity=1):
@@ -219,7 +236,7 @@ class Command(LabelCommand):
                 continue
 
             if self.verbosity >= 1:
-                log.print_regular('Updating backend for: %s' % model._meta.verbose_name_plural)
+                log.print_regular('Updating backend for %s' % model._meta.verbose_name_plural)
                 time_start_model = default_timer()
 
             if self.workers > 0:
@@ -234,25 +251,31 @@ class Command(LabelCommand):
             total = qs.count()
 
             if self.verbosity >= 1:
-                print(u"Indexing %d %s" % (total, force_text(model._meta.verbose_name_plural)))
+                print(u"  Indexing %d %s" % (total, force_text(model._meta.verbose_name_plural)))
 
             batch_size = self.batchsize or backend.batch_size
 
             if self.workers > 0:
                 ghetto_queue = []
 
+            timings = []
+
             for start in range(0, total, batch_size):
                 end = min(start + batch_size, total)
 
                 if self.workers == 0:
-                    do_update(backend, index, qs, start, end, total, self.verbosity)
+                    timings.append(do_update(backend, index, qs, start, end, total, self.verbosity))
                 else:
                     ghetto_queue.append(('do_update', model, start, end, total, using, self.start_date, self.end_date, self.verbosity))
 
             if self.workers > 0:
                 pool = multiprocessing.Pool(self.workers)
-                pool.map(worker, ghetto_queue)
-                pool.terminate()
+                timings = pool.map(worker, ghetto_queue)
+                pool.close()
+                pool.join()
+
+            # print('timings:')
+            # print(timings)
 
             if self.remove:
                 # For some reason, if we don't close them all out, we find out that the connection
@@ -288,4 +311,17 @@ class Command(LabelCommand):
 
             if self.verbosity >= 1:
                 time_end_model = default_timer()
-                log.print_regular('Finished updating backend for %s. It took: %2.2fs total.\n' % (model._meta.verbose_name_plural, time_end_model - time_start_model))
+                log.print_regular('Finished updating backend for %s. It took: %2.2fs total.' % (model._meta.verbose_name_plural, time_end_model - time_start_model))
+
+            total_precache = sum(imap(itemgetter('precache'), timings))
+            total_prep = sum(imap(itemgetter('prep'), timings))
+
+            if self.verbosity >= 3:
+                log.print_regular('----------')
+                log.print_regular('Breakdown:')
+                log.print_regular('----------')
+                log.print_regular('Total Precache: %2.2fs' % (total_precache))
+                log.print_regular('Total Prep: %2.2fs' % (total_prep))
+                log.print_regular('==========')
+
+            print('')
