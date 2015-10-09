@@ -30,11 +30,45 @@ except ImportError:
     from datetime import datetime
     now = datetime.now
 
+from timeit import default_timer
 
 DEFAULT_BATCH_SIZE = None
 DEFAULT_AGE = None
 APP = 'app'
 MODEL = 'model'
+
+
+def format_timedelta(td_object):
+    """
+    Turns a timedelta object into a string formatted such as:
+        "1 day, 3 hours, 38 minutes, 20 seconds"
+    (Adapted from http://stackoverflow.com/a/13756038)
+    """
+    seconds = int(td_object.total_seconds())
+
+    if not seconds:
+        return 'less than a second'
+
+    periods = [
+            ('year',        60*60*24*365),
+            ('month',       60*60*24*30),
+            ('day',         60*60*24),
+            ('hour',        60*60),
+            ('minute',      60),
+            ('second',      1)
+    ]
+
+    strings = []
+
+    for period_name, period_seconds in periods:
+        if seconds >= period_seconds:
+            period_value, seconds = divmod(seconds, period_seconds)
+            if period_value == 1:
+                strings.append("%s %s" % (period_value, period_name))
+            else:
+                strings.append("%s %ss" % (period_value, period_name))
+
+    return ', '.join(strings)
 
 
 def worker(bits):
@@ -83,11 +117,10 @@ def do_update(backend, index, qs, start, end, total, verbosity=1):
 
     if verbosity >= 2:
         if hasattr(os, 'getppid') and os.getpid() == os.getppid():
-            print("  indexed %s - %d of %d." % (start + 1, end, total))
+            print('  indexing {} - {} of {}'.format(start + 1, end, total))
         else:
-            print("  indexed %s - %d of %d (by %s)." % (start + 1, end, total, os.getpid()))
+            print('  indexing {} - {} of {} (by {})'.format(start + 1, end, total, os.getpid()))
 
-    # FIXME: Get the right backend.
     backend.update(index, current_qs)
 
     # Clear out the DB connections queries because it bloats up RAM.
@@ -152,6 +185,7 @@ class Command(LabelCommand):
         self.end_date = None
         self.remove = options.get('remove', False)
         self.workers = int(options.get('workers', 0))
+        self.logger = logging.getLogger('haystack')
 
         self.backends = options.get('using')
         if not self.backends:
@@ -190,8 +224,26 @@ class Command(LabelCommand):
             try:
                 self.update_backend(label, using)
             except:
-                logging.exception("Error updating %s using %s ", label, using)
+                logging.exception('Error updating {} using {}.'.format(label, using))
                 raise
+
+    def log_start(self, model_set_name):
+        if self.verbosity >= 1:
+            self.time_start_model = default_timer()
+
+            self.logger.info('Updating backend for: {}...'.format(model_set_name))
+
+    def log_end(self, model_set_name):
+        if self.verbosity >= 1:
+            self.time_end_model = default_timer()
+
+            elapsed = timedelta(seconds=(self.time_end_model - self.time_start_model))
+
+            self.logger.info('Finished updating backend for {}. It took {} ({:.2f}s) total.'.format(
+                model_set_name,
+                format_timedelta(elapsed),
+                elapsed.total_seconds()
+            ))
 
     def update_backend(self, label, using):
         from haystack.exceptions import NotHandled
@@ -203,12 +255,16 @@ class Command(LabelCommand):
             import multiprocessing
 
         for model in get_models(label):
+            model_set_name = model._meta.verbose_name_plural
+
             try:
                 index = unified_index.get_index(model)
             except NotHandled:
                 if self.verbosity >= 2:
-                    print("Skipping '%s' - no index." % model)
+                    self.logger.debug('Skipping "{}" - no index.'.format(model))
                 continue
+
+            self.log_start(model_set_name)
 
             if self.workers > 0:
                 # workers resetting connections leads to references to models / connections getting
@@ -222,7 +278,7 @@ class Command(LabelCommand):
             total = qs.count()
 
             if self.verbosity >= 1:
-                print(u"Indexing %d %s" % (total, force_text(model._meta.verbose_name_plural)))
+                self.logger.info('Indexing {} {}...'.format(total, force_text(model_set_name)))
 
             batch_size = self.batchsize or backend.batch_size
 
@@ -273,3 +329,5 @@ class Command(LabelCommand):
                     pool = multiprocessing.Pool(self.workers)
                     pool.map(worker, ghetto_queue)
                     pool.terminate()
+
+            self.log_end(model_set_name)
