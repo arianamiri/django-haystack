@@ -118,10 +118,11 @@ def do_update(backend, index, qs, start, end, total, verbosity=1):
     index.pre_process_data(current_qs)
 
     if verbosity >= 2:
+        base_text = '  indexing {1:>{0}} - {2:>{0}} (of {3:>{0}})'.format(len(str(total)), start + 1, end, total)
         if hasattr(os, 'getppid') and os.getpid() == os.getppid():
-            print('  indexing {} - {} (of {})'.format(start + 1, end, total))
+            print(base_text)
         else:
-            print('  indexing {} - {} (of {}) [by {}]'.format(start + 1, end, total, os.getpid()))
+            print('{} [by {}]'.format(base_text, os.getpid()))
 
     backend.update(index, current_qs)
 
