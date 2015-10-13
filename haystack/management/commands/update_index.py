@@ -11,6 +11,7 @@ from django.core.management.base import LabelCommand
 from django.db import reset_queries
 
 from haystack import connections as haystack_connections
+from haystack.exceptions import ConnectionError
 from haystack.query import SearchQuerySet
 from haystack.utils.app_loading import get_models, load_apps
 
@@ -102,6 +103,7 @@ def worker(bits):
 
     if func == 'do_update':
         qs = index.build_queryset(start_date=start_date, end_date=end_date)
+
         do_update(backend, index, qs, start, end, total, verbosity=verbosity)
     elif bits[0] == 'do_remove':
         do_remove(backend, index, model, pks_seen, start, upper_bound, verbosity=verbosity)
@@ -117,9 +119,9 @@ def do_update(backend, index, qs, start, end, total, verbosity=1):
 
     if verbosity >= 2:
         if hasattr(os, 'getppid') and os.getpid() == os.getppid():
-            print('  indexing {} - {} of {}'.format(start + 1, end, total))
+            print('  indexing {} - {} (of {})'.format(start + 1, end, total))
         else:
-            print('  indexing {} - {} of {} (by {})'.format(start + 1, end, total, os.getpid()))
+            print('  indexing {} - {} (of {}) [by {}]'.format(start + 1, end, total, os.getpid()))
 
     backend.update(index, current_qs)
 
@@ -223,6 +225,9 @@ class Command(LabelCommand):
         for using in self.backends:
             try:
                 self.update_backend(label, using)
+            except ConnectionError as ce:
+                self.logger.info('> Connection Error: "{}". Could not index "{}"'.format(ce.message, label))
+                pass
             except:
                 logging.exception('Error updating {} using {}.'.format(label, using))
                 raise
@@ -231,7 +236,7 @@ class Command(LabelCommand):
         if self.verbosity >= 1:
             self.time_start_model = default_timer()
 
-            self.logger.info('Updating backend for: {}...'.format(model_set_name))
+            self.logger.info('Updating backend for: {}'.format(model_set_name))
 
     def log_end(self, model_set_name):
         if self.verbosity >= 1:
@@ -295,8 +300,10 @@ class Command(LabelCommand):
 
             if self.workers > 0:
                 pool = multiprocessing.Pool(self.workers)
-                pool.map(worker, ghetto_queue)
-                pool.terminate()
+                try:
+                    pool.map(worker, ghetto_queue)
+                finally:
+                    pool.terminate()
 
             if self.remove:
                 # For some reason, if we don't close them all out, we find out that the connection

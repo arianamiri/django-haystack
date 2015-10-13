@@ -12,7 +12,7 @@ from django.utils import six
 import haystack
 from haystack.backends import BaseEngine, BaseSearchBackend, BaseSearchQuery, log_query
 from haystack.constants import DEFAULT_OPERATOR, DJANGO_CT, DJANGO_ID, ID
-from haystack.exceptions import MissingDependency, MoreLikeThisError
+from haystack.exceptions import ConnectionError, MissingDependency, MoreLikeThisError
 from haystack.inputs import Clean, Exact, PythonData, Raw
 from haystack.models import SearchResult
 from haystack.utils import log as logging
@@ -184,7 +184,10 @@ class ElasticsearchSearchBackend(BaseSearchBackend):
                     }
                 })
 
-        bulk_index(self.conn, prepped_docs, index=self.index_name, doc_type='modelresult')
+        try:
+            bulk_index(self.conn, prepped_docs, index=self.index_name, doc_type='modelresult')
+        except elasticsearch.exceptions.ConnectionError:
+            raise ConnectionError('Could not connect to the ElasticSearch server')
 
         if commit:
             self.conn.indices.refresh(index=self.index_name)
