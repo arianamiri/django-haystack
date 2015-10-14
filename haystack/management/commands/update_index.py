@@ -37,6 +37,7 @@ DEFAULT_BATCH_SIZE = None
 DEFAULT_AGE = None
 APP = 'app'
 MODEL = 'model'
+WORKER_TIMEOUT = 60 # seconds
 
 
 def format_timedelta(td_object):
@@ -302,7 +303,9 @@ class Command(LabelCommand):
             if self.workers > 0:
                 pool = multiprocessing.Pool(self.workers)
                 try:
-                    pool.map(worker, ghetto_queue)
+                    pool.map_async(worker, ghetto_queue).get(timeout=WORKER_TIMEOUT)
+                except multiprocessing.TimeoutError:
+                    self.logger.error('[TIMEOUT] A worker process timed out')
                 finally:
                     pool.terminate()
 
