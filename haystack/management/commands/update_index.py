@@ -37,7 +37,6 @@ DEFAULT_BATCH_SIZE = None
 DEFAULT_AGE = None
 APP = 'app'
 MODEL = 'model'
-WORKER_TIMEOUT = 60 # seconds
 
 
 def format_timedelta(td_object):
@@ -155,7 +154,7 @@ class Command(LabelCommand):
             help='Allows for the use multiple workers to parallelize indexing. Requires multiprocessing.'
         ),
         make_option('-t', '--timeout', action='store', dest='timeout',
-            default=WORKER_TIMEOUT, type='float',
+            default=0, type='float',
             help='Number of seconds after which a worker process will be considered timed out'
         ),
     )
@@ -271,20 +270,20 @@ class Command(LabelCommand):
             batches = ((start, min(start + batch_size, total)) for start in range(0, total, batch_size))
 
             if self.workers:
-                from pebble import process as p_town, TimeoutError
+                from pebble import process, TimeoutError as PebbleTimeoutError
 
                 action_queue = [
                     ('do_update', model, start, end, total, using, self.start_date, self.end_date, self.verbosity)
                     for (start, end) in batches
                 ]
 
-                with p_town.Pool(workers=self.workers) as pool:
+                with process.Pool(workers=self.workers) as pool:
                     jobs = [pool.schedule(worker, args=[action], timeout=self.timeout) for action in action_queue]
 
                 for job in jobs:
                     try:
                         job.get()
-                    except TimeoutError:
+                    except PebbleTimeoutError:
                         self.log_error('A worker process timed out')
 
                 pool.stop()
