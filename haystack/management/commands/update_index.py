@@ -110,11 +110,11 @@ def do_update(backend, index, query_set, start, end, total, verbosity=1):
     index.pre_process_data(current_qs)
 
     if verbosity >= 2:
-        base_text = '  indexing {1:>{0}} - {2:>{0}} (of {3:>{0}})'.format(len(str(total)), start + 1, end, total)
+        base_text = '[Haystack]   indexing {1:>{0}} - {2:>{0}} (of {3:>{0}})'.format(len(str(total)), start + 1, end, total)
         if hasattr(os, 'getppid') and os.getpid() == os.getppid():
             print(base_text)
         else:
-            print('{} [by {}]'.format(base_text, os.getpid()))
+            print('{} [PID {}]'.format(base_text, os.getpid()))
 
     backend.update(index, current_qs)
 
@@ -303,14 +303,13 @@ class Command(LabelCommand):
             self.log_end(model_set_name)
 
     def remove_items(self, backend, batch_size, index, model, commit):
+        model_set_name = model._meta.verbose_name_plural
+
+        self.log_info('Looking for {} that need pruning...'.format(model_set_name))
+
         database_pks = list(smart_bytes(pk) for pk in index.index_queryset().values_list('pk', flat=True))
 
         search_query_set = SearchQuerySet(using=backend.connection_alias).models(model)
-
-        # Since records may still be in the search index but not the local database
-        # we'll use that to create batches for processing.
-        # See https://github.com/django-haystack/django-haystack/issues/1186
-        index_total_count = search_query_set.count()
 
         # Retrieve PKs from the index. Note that this cannot be a numeric range query because although
         # pks are normally numeric they can be non-numeric UUIDs or other custom values. To reduce
@@ -319,26 +318,23 @@ class Command(LabelCommand):
         # record should it be found to be stale.
         all_index_pks = search_query_set.values_list('pk', 'id')
 
-        # We'll collect all of the record IDs which are no longer present in the database and delete
-        # them after walking the entire index. This uses more memory than the incremental approach but
-        # avoids needing the pagination logic below to account for both commit modes:
         stale_records = set()
-
-        for start in range(0, index_total_count, batch_size):
+        for start in range(0, search_query_set.count(), batch_size):
             upper_bound = start + batch_size
-
-            # If the database pk is no longer present, queue the index key for removal:
             for pk, rec_id in all_index_pks[start:upper_bound]:
                 if smart_bytes(pk) not in database_pks:
                     stale_records.add(rec_id)
 
         if stale_records:
             if self.verbosity >= 1:
-                self.log_info('  removing {} stale records...'.format(len(stale_records)))
+                self.log_info('  removing {} stale {}...'.format(len(stale_records), model_set_name))
 
-            for rec_id in stale_records:
-                # Since the PK was not in the database list, we'll delete the record from the search index:
+            for pk, rec_id in stale_records:
                 if self.verbosity >= 2:
                     self.log_info('    removing {}'.format(rec_id))
 
                 backend.remove(rec_id, commit=commit)
+
+            self.log_info('Done pruning {}'.format(model_set_name))
+        else:
+            self.log_info('No {} required pruning'.format(model_set_name))
