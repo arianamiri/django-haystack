@@ -43,7 +43,7 @@ class Command(BaseCommand):
                 sys.exit()
 
         if self.verbosity >= 1:
-            print("Removing all documents from your index because you said so...")
+            print("Removing all documents from your index because you said so.")
 
         for backend_name in using:
             backend = connections[backend_name].get_backend()
