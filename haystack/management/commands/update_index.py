@@ -2,6 +2,7 @@
 from __future__ import absolute_import, print_function, unicode_literals
 
 import logging
+import traceback
 import os
 from datetime import timedelta
 from optparse import make_option
@@ -78,45 +79,52 @@ def worker(bits):
     else:
         raise NotImplementedError('Unknown function {}'.format(bits[0]))
 
-    time_start_batch = default_timer()
+    try:
+        time_start_batch = default_timer()
 
-    model_set_name = model._meta.verbose_name_plural
-    # We need to reset the connections, otherwise the different processes
-    # will try to share the connection, which causes things to blow up.
-    from django.db import connections
+        model_set_name = model._meta.verbose_name_plural
+        # We need to reset the connections, otherwise the different processes
+        # will try to share the connection, which causes things to blow up.
+        from django.db import connections
 
-    for alias, info in connections.databases.items():
-        # We need to also tread lightly with SQLite, because blindly wiping
-        # out connections (via ``... = {}``) destroys in-memory DBs.
-        if 'sqlite3' not in info['ENGINE']:
-            try:
-                db.close_connection()
-                if isinstance(connections._connections, dict):
-                    del(connections._connections[alias])
-                else:
-                    delattr(connections._connections, alias)
-            except KeyError:
-                pass
+        for alias, info in connections.databases.items():
+            # We need to also tread lightly with SQLite, because blindly wiping
+            # out connections (via ``... = {}``) destroys in-memory DBs.
+            if 'sqlite3' not in info['ENGINE']:
+                try:
+                    db.close_connection()
+                    if isinstance(connections._connections, dict):
+                        del(connections._connections[alias])
+                    else:
+                        delattr(connections._connections, alias)
+                except KeyError:
+                    pass
 
-    model_set_name = model._meta.verbose_name_plural
+        model_set_name = model._meta.verbose_name_plural
 
-    backend = haystack_connections[using].get_backend()
-    index = haystack_connections[using].get_unified_index().get_index(model)
-    query_set = index.build_queryset(start_date=start_date, end_date=end_date)
+        backend = haystack_connections[using].get_backend()
+        index = haystack_connections[using].get_unified_index().get_index(model)
+        query_set = index.build_queryset(start_date=start_date, end_date=end_date)
 
-    do_update(backend, index, query_set, start, end, total, verbosity=verbosity)
+        do_update(backend, index, query_set, start, end, total, verbosity=verbosity)
 
-    time_end_batch = default_timer()
+        time_end_batch = default_timer()
 
-    elapsed = timedelta(seconds=(time_end_batch - time_start_batch))
+        elapsed = timedelta(seconds=(time_end_batch - time_start_batch))
 
-    print('[Haystack] >> Finished a {} batch!. It took {} ({:.2f}s) total. [{}]'.format(
-        model_set_name,
-        format_timedelta(elapsed),
-        elapsed.total_seconds(),
-        '{} - {} ({})'.format(start, end, total)
-    ))
+        print('[Haystack]   << Finished a {} batch. It took {} ({:.2f}s) total. [{}]'.format(
+            model_set_name,
+            format_timedelta(elapsed),
+            elapsed.total_seconds(),
+            '{} - {} ({})'.format(start + 1, end, total)
+        ))
 
+    except:
+        print()
+        print('[Haystack] JOB FAIL')
+        traceback.print_stack()
+        print()
+        raise
 
 def do_update(backend, index, query_set, start, end, total, verbosity=1):
     # Get a clone of the QuerySet so that the cache doesn't bloat up
@@ -126,7 +134,7 @@ def do_update(backend, index, query_set, start, end, total, verbosity=1):
     index.pre_process_data(current_qs)
 
     if verbosity >= 2:
-        base_text = '[Haystack]   indexing {1:>{0}} - {2:>{0}} (of {3:>{0}})'.format(len(str(total)), start + 1, end, total)
+        base_text = '[Haystack]   >> indexing {1:>{0}} - {2:>{0}} (of {3:>{0}})'.format(len(str(total)), start + 1, end, total)
         if hasattr(os, 'getppid') and os.getpid() == os.getppid():
             print(base_text)
         else:
@@ -303,7 +311,7 @@ class Command(LabelCommand):
                     except PebbleTimeoutError:
                         self.log_error('A worker process timed out')
 
-                pool.stop()
+                # pool.close()
                 pool.join()
 
                 # workers resetting connections leads to references to models / connections getting
