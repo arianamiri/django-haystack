@@ -112,7 +112,7 @@ def worker(bits):
 
         elapsed = timedelta(seconds=(time_end_batch - time_start_batch))
 
-        print('[Haystack]   << Finished a {} batch. It took {} ({:.2f}s) total. [{}]'.format(
+        print('[Haystack]   < Finished a {} batch. It took {} ({:.2f}s) total. [{}]'.format(
             model_set_name,
             format_timedelta(elapsed),
             elapsed.total_seconds(),
@@ -134,7 +134,7 @@ def do_update(backend, index, query_set, start, end, total, verbosity=1):
     index.pre_process_data(current_qs)
 
     if verbosity >= 2:
-        base_text = '[Haystack]   >> indexing {1:>{0}} - {2:>{0}} (of {3:>{0}})'.format(len(str(total)), start + 1, end, total)
+        base_text = '[Haystack]  > Indexing {1:>{0}} - {2:>{0}} (of {3:>{0}})'.format(len(str(total)), start + 1, end, total)
         if hasattr(os, 'getppid') and os.getpid() == os.getppid():
             print(base_text)
         else:
@@ -225,8 +225,12 @@ class Command(LabelCommand):
 
         return super(Command, self).handle(*items, **options)
 
-    def log_info(self, message):
+    def log_info(self, message, header=None, footer=None):
+        if header:
+            self.logger.info('[Haystack] {}'.format(len(message) * header))
         self.logger.info('[Haystack] {}'.format(message))
+        if footer:
+            self.logger.info('[Haystack] {}'.format(len(message) * footer))
 
     def log_error(self, message):
         self.logger.error('[Haystack] ERROR: {}'.format(message))
@@ -249,7 +253,7 @@ class Command(LabelCommand):
         if self.verbosity >= 1:
             self.time_start_model = default_timer()
 
-            self.log_info('Updating backend for: {}'.format(model_set_name))
+            self.log_info('-- Updating all {} --'.format(model_set_name), header='=', footer='-')
 
     def log_end(self, model_set_name):
         if self.verbosity >= 1:
@@ -257,7 +261,7 @@ class Command(LabelCommand):
 
             elapsed = timedelta(seconds=(self.time_end_model - self.time_start_model))
 
-            self.log_info('Finished updating backend for {}. It took {} ({:.2f}s) total.'.format(
+            self.log_info(' < Finished updating backend for {}. It took {} ({:.2f}s) total.'.format(
                 model_set_name,
                 format_timedelta(elapsed),
                 elapsed.total_seconds()
@@ -287,32 +291,23 @@ class Command(LabelCommand):
             total = query_set.count()
 
             if self.verbosity >= 1:
-                self.log_info('Indexing {} {}...'.format(total, force_text(model_set_name)))
+                self.log_info('> Indexing {} {}...'.format(total, force_text(model_set_name)))
 
             batch_size = self.batchsize or backend.batch_size
 
             batches = ((start, min(start + batch_size, total)) for start in range(0, total, batch_size))
 
             if self.workers:
-                from pebble import TimeoutError as PebbleTimeoutError
-                from pebble.process import Pool
+                import multiprocessing
 
                 action_queue = [
                     ('do_update', model, start, end, total, using, self.start_date, self.end_date, self.verbosity)
                     for (start, end) in batches
                 ]
 
-                with Pool(workers=self.workers) as pool:
-                    jobs = [pool.schedule(worker, args=[action], timeout=self.timeout) for action in action_queue]
-
-                for job in jobs:
-                    try:
-                        job.get()
-                    except PebbleTimeoutError:
-                        self.log_error('A worker process timed out')
-
-                # pool.close()
-                pool.join()
+                pool = multiprocessing.Pool(self.workers)
+                pool.map(worker, action_queue)
+                pool.terminate()
 
                 # workers resetting connections leads to references to models / connections getting
                 # stale and having their connection disconnected from under them. Resetting before
@@ -322,15 +317,15 @@ class Command(LabelCommand):
                 for (start, end) in batches:
                     do_update(backend, index, query_set, start, end, total, self.verbosity)
 
+            self.log_end(model_set_name)
+
             if self.remove:
                 self.remove_items(backend, batch_size, index, model, True)
-
-            self.log_end(model_set_name)
 
     def remove_items(self, backend, batch_size, index, model, commit):
         model_set_name = model._meta.verbose_name_plural
 
-        self.log_info('Looking for {} that need pruning...'.format(model_set_name))
+        self.log_info('> Looking for {} that need pruning...'.format(model_set_name))
 
         database_pks = list(smart_bytes(pk) for pk in index.index_queryset().values_list('pk', flat=True))
 
@@ -352,14 +347,14 @@ class Command(LabelCommand):
 
         if stale_records:
             if self.verbosity >= 1:
-                self.log_info('  removing {} stale {}...'.format(len(stale_records), model_set_name))
+                self.log_info(' > removing {} stale {}...'.format(len(stale_records), model_set_name))
 
             for pk, rec_id in stale_records:
                 if self.verbosity >= 2:
-                    self.log_info('    removing {}'.format(rec_id))
+                    self.log_info('  < removing {}'.format(rec_id))
 
                 backend.remove(rec_id, commit=commit)
 
-            self.log_info('Done pruning {}'.format(model_set_name))
+            self.log_info(' < Done pruning {}'.format(model_set_name))
         else:
-            self.log_info('No {} required pruning'.format(model_set_name))
+            self.log_info(' < No {} required pruning'.format(model_set_name))
