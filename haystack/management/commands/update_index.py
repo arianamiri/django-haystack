@@ -73,6 +73,14 @@ def format_timedelta(td_object):
 
 
 def worker(bits):
+    if bits[0] == 'do_update':
+        func, model, start, end, total, using, start_date, end_date, verbosity = bits[:9]
+    else:
+        raise NotImplementedError('Unknown function {}'.format(bits[0]))
+
+    time_start_batch = default_timer()
+
+    model_set_name = model._meta.verbose_name_plural
     # We need to reset the connections, otherwise the different processes
     # will try to share the connection, which causes things to blow up.
     from django.db import connections
@@ -90,16 +98,24 @@ def worker(bits):
             except KeyError:
                 pass
 
-    if bits[0] == 'do_update':
-        func, model, start, end, total, using, start_date, end_date, verbosity = bits[:9]
-    else:
-        raise NotImplementedError('Unknown function %s' % bits[0])
+    model_set_name = model._meta.verbose_name_plural
 
     backend = haystack_connections[using].get_backend()
     index = haystack_connections[using].get_unified_index().get_index(model)
     query_set = index.build_queryset(start_date=start_date, end_date=end_date)
 
     do_update(backend, index, query_set, start, end, total, verbosity=verbosity)
+
+    time_end_batch = default_timer()
+
+    elapsed = timedelta(seconds=(time_end_batch - time_start_batch))
+
+    print('[Haystack] >> Finished a {} batch!. It took {} ({:.2f}s) total. [{}]'.format(
+        model_set_name,
+        format_timedelta(elapsed),
+        elapsed.total_seconds(),
+        '{} - {} ({})'.format(start, end, total)
+    ))
 
 
 def do_update(backend, index, query_set, start, end, total, verbosity=1):
@@ -270,14 +286,15 @@ class Command(LabelCommand):
             batches = ((start, min(start + batch_size, total)) for start in range(0, total, batch_size))
 
             if self.workers:
-                from pebble import process, TimeoutError as PebbleTimeoutError
+                from pebble import TimeoutError as PebbleTimeoutError
+                from pebble.process import Pool
 
                 action_queue = [
                     ('do_update', model, start, end, total, using, self.start_date, self.end_date, self.verbosity)
                     for (start, end) in batches
                 ]
 
-                with process.Pool(workers=self.workers) as pool:
+                with Pool(workers=self.workers) as pool:
                     jobs = [pool.schedule(worker, args=[action], timeout=self.timeout) for action in action_queue]
 
                 for job in jobs:
