@@ -36,7 +36,3 @@ class SpatialError(HaystackError):
 class StatsError(HaystackError):
     "Raised when incorrect arguments have been provided for stats"
     pass
-
-class ConnectionError(HaystackError):
-    "Raised when there's a problem with the connection to the backend"
-    pass
