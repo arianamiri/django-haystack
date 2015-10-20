@@ -12,7 +12,7 @@ from django.core.management.base import LabelCommand
 from django.db import reset_queries
 
 from haystack import connections as haystack_connections
-from haystack.exceptions import ConnectionError
+from haystack.exceptions import ConnectionError, HaystackError
 from haystack.query import SearchQuerySet
 from haystack.utils.app_loading import get_models, load_apps
 
@@ -82,23 +82,26 @@ def worker(bits):
     try:
         time_start_batch = default_timer()
 
-        model_set_name = model._meta.verbose_name_plural
-        # We need to reset the connections, otherwise the different processes
-        # will try to share the connection, which causes things to blow up.
-        from django.db import connections
+        try:
+            model_set_name = model._meta.verbose_name_plural
+            # We need to reset the connections, otherwise the different processes
+            # will try to share the connection, which causes things to blow up.
+            from django.db import connections
 
-        for alias, info in connections.databases.items():
-            # We need to also tread lightly with SQLite, because blindly wiping
-            # out connections (via ``... = {}``) destroys in-memory DBs.
-            if 'sqlite3' not in info['ENGINE']:
-                try:
-                    db.close_connection()
-                    if isinstance(connections._connections, dict):
-                        del(connections._connections[alias])
-                    else:
-                        delattr(connections._connections, alias)
-                except KeyError:
-                    pass
+            for alias, info in connections.databases.items():
+                # We need to also tread lightly with SQLite, because blindly wiping
+                # out connections (via ``... = {}``) destroys in-memory DBs.
+                if 'sqlite3' not in info['ENGINE']:
+                    try:
+                        db.close_connection()
+                        if isinstance(connections._connections, dict):
+                            del(connections._connections[alias])
+                        else:
+                            delattr(connections._connections, alias)
+                    except KeyError:
+                        pass
+        except:
+            raise HaystackError('DB connection issue')
 
         model_set_name = model._meta.verbose_name_plural
 
@@ -106,7 +109,10 @@ def worker(bits):
         index = haystack_connections[using].get_unified_index().get_index(model)
         query_set = index.build_queryset(start_date=start_date, end_date=end_date)
 
-        do_update(backend, index, query_set, start, end, total, verbosity=verbosity)
+        try:
+            do_update(backend, index, query_set, start, end, total, verbosity=verbosity)
+        except:
+            raise HaystackError('DO_UPDATE issue')
 
         time_end_batch = default_timer()
 
@@ -118,6 +124,12 @@ def worker(bits):
             elapsed.total_seconds(),
             '{} - {} ({})'.format(start + 1, end, total)
         ))
+    except HaystackError as he:
+        print()
+        print('[Haystack] JOB FAIL: {}'.format(he.message))
+        traceback.print_stack()
+        print()
+        raise
 
     except:
         print()
@@ -140,7 +152,10 @@ def do_update(backend, index, query_set, start, end, total, verbosity=1):
         else:
             print('{} [PID {}]'.format(base_text, os.getpid()))
 
-    backend.update(index, current_qs)
+    try:
+        backend.update(index, current_qs)
+    except:
+        raise HaystackError('UPDATE BACKEND issue')
 
     # Clear out the DB connections queries because it bloats up RAM.
     reset_queries()
