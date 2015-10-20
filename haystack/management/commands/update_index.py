@@ -111,8 +111,8 @@ def worker(bits):
 
         try:
             do_update(backend, index, query_set, start, end, total, verbosity=verbosity)
-        except:
-            raise HaystackError('DO_UPDATE issue')
+        except Exception as e:
+            raise HaystackError('DO_UPDATE issue ({})'.format(e.message))
 
         time_end_batch = default_timer()
 
@@ -154,8 +154,15 @@ def do_update(backend, index, query_set, start, end, total, verbosity=1):
 
     try:
         backend.update(index, current_qs)
-    except:
-        raise HaystackError('UPDATE BACKEND issue')
+    except Exception as e:
+        print()
+        print('[Haystack] !! { backend.update } threw:')
+        print('-----')
+        print(e)
+        print('-----')
+        traceback.print_stack()
+        print()
+        raise HaystackError('[Haystack] !! { backend.update } issue: {}'.format(e.message))
 
     # Clear out the DB connections queries because it bloats up RAM.
     reset_queries()

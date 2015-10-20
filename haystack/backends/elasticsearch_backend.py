@@ -1,6 +1,7 @@
 from __future__ import unicode_literals
 
 import datetime
+import traceback
 import re
 import warnings
 
@@ -152,6 +153,10 @@ class ElasticsearchSearchBackend(BaseSearchBackend):
                 self.setup()
             except elasticsearch.TransportError as e:
                 if not self.silently_fail:
+                    print()
+                    print('< elastic >')
+                    traceback.print_stack()
+                    print()
                     raise
 
                 self.log.error("Failed to add documents to Elasticsearch: %s", e)
@@ -170,8 +175,21 @@ class ElasticsearchSearchBackend(BaseSearchBackend):
                 final_data['_id'] = final_data[ID]
 
                 prepped_docs.append(final_data)
+            except Exception as ex:
+                print()
+                print('[ElasticSearch Backend] some exception:')
+                print('==--==')
+                print(ex)
+                print('==--==')
+                traceback.print_stack()
+                print()
+                raise
             except elasticsearch.TransportError as e:
                 if not self.silently_fail:
+                    print()
+                    print('< elastic >')
+                    traceback.print_stack()
+                    print()
                     raise
 
                 # We'll log the object identifier but won't include the actual object
@@ -187,10 +205,23 @@ class ElasticsearchSearchBackend(BaseSearchBackend):
         try:
             bulk_index(self.conn, prepped_docs, index=self.index_name, doc_type='modelresult')
         except elasticsearch.exceptions.ConnectionError as ce:
+            print ''
+            print '< elasticsearch.exceptions.ConnectionError >'
+            print '----------'
+            print ce
+            print '----------'
+            print 'Message: {}'.format(ce.message)
+            print 'Info:    {}'.format(ce.info)
+            traceback.print_stack()
+            print '-'*20
             raise ConnectionError('Could not connect to the ElasticSearch server for index \'{}\' ({})'.format(self.index_name, ce.info))
+
+        print '[ElasticSearch Backend] committing...'
 
         if commit:
             self.conn.indices.refresh(index=self.index_name)
+
+        print '[ElasticSearch Backend] committed.'
 
     def remove(self, obj_or_string, commit=True):
         doc_id = get_identifier(obj_or_string)
