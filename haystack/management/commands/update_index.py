@@ -154,7 +154,7 @@ def do_update(backend, index, query_set, start, end, total, verbosity=1):
             print('{} [PID {}]'.format(base_text, os.getpid()))
 
     try:
-        backend.update(index, current_qs)
+        backend.update(index, current_qs, commit=False)
     except Exception as e:
         print()
         print('[Haystack] !! { backend.update } threw:')
@@ -353,44 +353,46 @@ class Command(LabelCommand):
             self.log_end(' < Finished updating backend for {}.'.format(model_set_name))
 
             if self.remove:
-                self.remove_items(backend, batch_size, index, model, True)
+                self.remove_items(backend, batch_size * 4, index, model, True)
+
+    def get_batches(self, data_set, batch_size):
+        return (set(data_set[start:start + batch_size]) for start in range(0, len(data_set), batch_size))
 
     def remove_items(self, backend, batch_size, index, model, commit):
         model_set_name = model._meta.verbose_name_plural
 
         self.log_start('> Looking for {} that need pruning...'.format(model_set_name), timer_name='collate')
 
-        database_pks = list(smart_bytes(pk) for pk in index.index_queryset().values_list('pk', flat=True))
+        database_pks = set(map(str, index.index_queryset().values_list('pk', flat=True)))
 
-        search_query_set = SearchQuerySet(using=backend.connection_alias).models(model)
+        search_query_set = SearchQuerySet(using=backend.connection_alias).models(model).values_list('pk', flat=True)
 
-        # Retrieve PKs from the index. Note that this cannot be a numeric range query because although
-        # pks are normally numeric they can be non-numeric UUIDs or other custom values. To reduce
-        # load on the search engine, we only retrieve the pk field, which will be checked against the
-        # full list obtained from the database, and the id field, which will be used to delete the
-        # record should it be found to be stale.
-        all_index_pks = search_query_set.values_list('pk', 'id')
+        # index_pks = search_query_set
+        # all_them = set()
+        # for start in range(0, search_query_set.count(), batch_size):
+        #     all_them = all_them | set(index_pks[start:start + batch_size])
 
-        stale_records = set()
-        for start in range(0, search_query_set.count(), batch_size):
-            upper_bound = start + batch_size
-            for pk, rec_id in all_index_pks[start:upper_bound]:
-                if smart_bytes(pk) not in database_pks:
-                    stale_records.add(rec_id)
+        # Grab the PKs from the index in batches for memory reasons
+        all_them = set().union(*list(self.get_batches(search_query_set, batch_size)))
 
-        self.log_info('> Stale records collated')
+        self.log_end('< Got `all_them`', timer_name='collate')
+
+        stale_record_pks = all_them - database_pks
+
+        # self.log_info('> Stale records collated')
         self.log_end('< Done collating', timer_name='collate')
 
-        if stale_records:
-            if self.verbosity >= 1:
-                self.log_info(' > removing {} stale {}...'.format(len(stale_records), model_set_name))
-
-            for pk, rec_id in stale_records:
-                if self.verbosity >= 2:
-                    self.log_info('  < removing {}'.format(rec_id))
-
-                backend.remove(rec_id, commit=commit)
-
-            self.log_info(' < Done pruning {}'.format(model_set_name))
-        else:
-            self.log_info(' < No {} required pruning'.format(model_set_name))
+        print('stale_record_pks: {}'.format(stale_record_pks))
+        # if stale_records:
+        #     if self.verbosity >= 1:
+        #         self.log_info(' > removing {} stale {}...'.format(len(stale_records), model_set_name))
+        #
+        #     for rec_id in stale_records:
+        #         if self.verbosity >= 2:
+        #             self.log_info('  < removing {}'.format(rec_id))
+        #
+        #         backend.remove(rec_id, commit=commit)
+        #
+        #     self.log_info(' < Done pruning {}'.format(model_set_name))
+        # else:
+        #     self.log_info(' < No {} required pruning'.format(model_set_name))

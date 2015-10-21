@@ -17,6 +17,11 @@ stream = logging.StreamHandler()
 stream.setLevel(logging.INFO)
 log.addHandler(stream)
 
+elog = logging.getLogger('elasticsearch')
+estream = logging.StreamHandler()
+estream.setLevel(logging.DEBUG)
+elog.addHandler(estream)
+
 
 # Help people clean up from 1.X.
 if hasattr(settings, 'HAYSTACK_SITECONF'):

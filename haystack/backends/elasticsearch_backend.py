@@ -182,10 +182,6 @@ class ElasticsearchSearchBackend(BaseSearchBackend):
                 raise
             except elasticsearch.TransportError as e:
                 if not self.silently_fail:
-                    print()
-                    print('< elastic >')
-                    traceback.print_stack()
-                    print()
                     raise
 
                 # We'll log the object identifier but won't include the actual object
