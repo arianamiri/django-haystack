@@ -1,5 +1,6 @@
 # encoding: utf-8
 from __future__ import absolute_import, print_function, unicode_literals
+from collections import defaultdict
 
 import logging
 import traceback
@@ -245,9 +246,14 @@ class Command(LabelCommand):
         if not items:
             items = load_apps()
 
+        self.timers = defaultdict(dict)
+
         return super(Command, self).handle(*items, **options)
 
     def log_info(self, message, header=None, footer=None):
+        if self.verbosity < 1:
+            return
+
         if header:
             self.logger.info('[Haystack] {}'.format(len(message) * header))
         self.logger.info('[Haystack] {}'.format(message))
@@ -271,22 +277,27 @@ class Command(LabelCommand):
                 self.log_error('Encountered unknown issue while attempting to update "{}" (using {})'.format(label, using))
                 raise
 
-    def log_start(self, model_set_name):
-        if self.verbosity >= 1:
-            self.time_start_model = default_timer()
+    def log_start_header(self, model_set_name):
+        self.log_start('-- Updating all {} --'.format(model_set_name), timer_name='default', header='=', footer='-')
 
-            self.log_info('-- Updating all {} --'.format(model_set_name), header='=', footer='-')
+    def log_start(self, message, timer_name='default', header=None, footer=None):
+        if self.verbosity < 1:
+            return
 
-    def log_end(self, model_set_name):
-        if self.verbosity >= 1:
-            self.time_end_model = default_timer()
+        self.timers[timer_name]['start'] = default_timer()
 
-            elapsed = timedelta(seconds=(self.time_end_model - self.time_start_model))
+        self.log_info(message, header=header, footer=footer)
 
-            self.log_info(' < Finished updating backend for {}. It took {} ({:.2f}s) total.'.format(
-                model_set_name,
-                format_timedelta(elapsed),
-                elapsed.total_seconds()
+    def log_end(self, message, timer_name='default'):
+        if self.verbosity < 1:
+            return
+
+        elapsed = timedelta(seconds=(default_timer() - self.timers[timer_name]['start']))
+
+        self.log_info('{} It took {} ({:.2f}s) total.'.format(
+            message,
+            format_timedelta(elapsed),
+            elapsed.total_seconds()
             ))
 
     def update_backend(self, label, using):
@@ -305,7 +316,7 @@ class Command(LabelCommand):
                     self.log_debug('Skipping "{}" - no index.'.format(model))
                 continue
 
-            self.log_start(model_set_name)
+            self.log_start_header(model_set_name)
 
             query_set = index.build_queryset(using=using, start_date=self.start_date,
                                       end_date=self.end_date)
@@ -339,7 +350,7 @@ class Command(LabelCommand):
                 for (start, end) in batches:
                     do_update(backend, index, query_set, start, end, total, self.verbosity)
 
-            self.log_end(model_set_name)
+            self.log_end(' < Finished updating backend for {}.'.format(model_set_name))
 
             if self.remove:
                 self.remove_items(backend, batch_size, index, model, True)
@@ -347,7 +358,7 @@ class Command(LabelCommand):
     def remove_items(self, backend, batch_size, index, model, commit):
         model_set_name = model._meta.verbose_name_plural
 
-        self.log_info('> Looking for {} that need pruning...'.format(model_set_name))
+        self.log_start('> Looking for {} that need pruning...'.format(model_set_name), timer_name='collate')
 
         database_pks = list(smart_bytes(pk) for pk in index.index_queryset().values_list('pk', flat=True))
 
@@ -366,6 +377,9 @@ class Command(LabelCommand):
             for pk, rec_id in all_index_pks[start:upper_bound]:
                 if smart_bytes(pk) not in database_pks:
                     stale_records.add(rec_id)
+
+        self.log_info('> Stale records collated')
+        self.log_end('< Done collating', timer_name='collate')
 
         if stale_records:
             if self.verbosity >= 1:

@@ -153,10 +153,6 @@ class ElasticsearchSearchBackend(BaseSearchBackend):
                 self.setup()
             except elasticsearch.TransportError as e:
                 if not self.silently_fail:
-                    print()
-                    print('< elastic >')
-                    traceback.print_stack()
-                    print()
                     raise
 
                 self.log.error("Failed to add documents to Elasticsearch: %s", e)
@@ -177,7 +173,7 @@ class ElasticsearchSearchBackend(BaseSearchBackend):
                 prepped_docs.append(final_data)
             except Exception as ex:
                 print()
-                print('[ElasticSearch Backend] some exception:')
+                print('[Haystack|Elastic] Some exception:')
                 print('==--==')
                 print(ex)
                 print('==--==')
@@ -207,21 +203,21 @@ class ElasticsearchSearchBackend(BaseSearchBackend):
         except elasticsearch.exceptions.ConnectionError as ce:
             print ''
             print '< elasticsearch.exceptions.ConnectionError >'
-            print '----------'
+            print('==----==')
             print ce
-            print '----------'
+            print('==----==')
             print 'Message: {}'.format(ce.message)
             print 'Info:    {}'.format(ce.info)
             traceback.print_stack()
             print '-'*20
             raise ConnectionError('Could not connect to the ElasticSearch server for index \'{}\' ({})'.format(self.index_name, ce.info))
 
-        print '[ElasticSearch Backend] committing...'
+        # print '[Haystack|Elastic] committing...'
 
         if commit:
             self.conn.indices.refresh(index=self.index_name)
 
-        print '[ElasticSearch Backend] committed.'
+        # print '[Haystack|Elastic] committed.'
 
     def remove(self, obj_or_string, commit=True):
         doc_id = get_identifier(obj_or_string)
