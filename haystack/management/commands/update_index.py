@@ -360,39 +360,31 @@ class Command(LabelCommand):
 
     def remove_items(self, backend, batch_size, index, model, commit):
         model_set_name = model._meta.verbose_name_plural
+        search_query_set = SearchQuerySet(using=backend.connection_alias).models(model)
 
         self.log_start('> Looking for {} that need pruning...'.format(model_set_name), timer_name='collate')
 
         database_pks = set(map(str, index.index_queryset().values_list('pk', flat=True)))
 
-        search_query_set = SearchQuerySet(using=backend.connection_alias).models(model).values_list('pk', flat=True)
-
-        # index_pks = search_query_set
-        # all_them = set()
-        # for start in range(0, search_query_set.count(), batch_size):
-        #     all_them = all_them | set(index_pks[start:start + batch_size])
-
         # Grab the PKs from the index in batches for memory reasons
-        all_them = set().union(*list(self.get_batches(search_query_set, batch_size)))
-
-        self.log_end('< Got `all_them`', timer_name='collate')
+        all_them = set().union(*list(self.get_batches(search_query_set.values_list('pk', flat=True), batch_size)))
 
         stale_record_pks = all_them - database_pks
 
-        # self.log_info('> Stale records collated')
-        self.log_end('< Done collating', timer_name='collate')
+        self.log_end('< Done collating stale records', timer_name='collate')
 
-        print('stale_record_pks: {}'.format(stale_record_pks))
-        # if stale_records:
-        #     if self.verbosity >= 1:
-        #         self.log_info(' > removing {} stale {}...'.format(len(stale_records), model_set_name))
-        #
-        #     for rec_id in stale_records:
-        #         if self.verbosity >= 2:
-        #             self.log_info('  < removing {}'.format(rec_id))
-        #
-        #         backend.remove(rec_id, commit=commit)
-        #
-        #     self.log_info(' < Done pruning {}'.format(model_set_name))
-        # else:
-        #     self.log_info(' < No {} required pruning'.format(model_set_name))
+        if stale_record_pks:
+            rec_ids = set(search_query_set.filter(django_id__in=stale_record_pks).values_list('id', flat=True))
+
+            if self.verbosity >= 1:
+                self.log_info(' > removing {} stale {}...'.format(len(stale_record_pks), model_set_name))
+
+            for rec_id in rec_ids:
+                if self.verbosity >= 2:
+                    self.log_info('  < removing {}'.format(rec_id))
+
+                backend.remove(rec_id, commit=commit)
+
+            self.log_info(' < Done pruning {}'.format(model_set_name))
+        else:
+            self.log_info(' < No {} required pruning'.format(model_set_name))
