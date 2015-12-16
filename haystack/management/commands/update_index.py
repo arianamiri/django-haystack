@@ -1,7 +1,9 @@
 # encoding: utf-8
 from __future__ import absolute_import, print_function, unicode_literals
+from collections import defaultdict
 
 import logging
+import traceback
 import os
 from datetime import timedelta
 from optparse import make_option
@@ -11,6 +13,7 @@ from django.core.management.base import LabelCommand
 from django.db import reset_queries
 
 from haystack import connections as haystack_connections
+from haystack.exceptions import HaystackError
 from haystack.query import SearchQuerySet
 from haystack.utils.app_loading import get_models, load_apps
 
@@ -30,12 +33,12 @@ except ImportError:
     from datetime import datetime
     now = datetime.now
 
+from timeit import default_timer
 
 DEFAULT_BATCH_SIZE = None
 DEFAULT_AGE = None
 APP = 'app'
 MODEL = 'model'
-
 
 def worker(bits):
     # We need to reset the connections, otherwise the different processes
@@ -72,6 +75,8 @@ def worker(bits):
     elif bits[0] == 'do_remove':
         do_remove(backend, index, model, pks_seen, start, upper_bound, verbosity=verbosity)
 
+def haystack_message(message):
+    return '{{ Haystack }} {}'.format(message)
 
 def do_update(backend, index, qs, start, end, total, verbosity=1):
     # Get a clone of the QuerySet so that the cache doesn't bloat up
@@ -82,13 +87,23 @@ def do_update(backend, index, qs, start, end, total, verbosity=1):
     index.pre_process_data(current_qs)
 
     if verbosity >= 2:
+        base_text = ' > Indexing {1:>{0}} - {2:>{0}} (of {3:>{0}})'.format(len(str(total)), start + 1, end, total)
         if hasattr(os, 'getppid') and os.getpid() == os.getppid():
-            print("  indexed %s - %d of %d." % (start + 1, end, total))
+            print(haystack_message(base_text))
         else:
-            print("  indexed %s - %d of %d (by %s)." % (start + 1, end, total, os.getpid()))
+            print(haystack_message('{} [PID {}]'.format(base_text, os.getpid())))
 
-    # FIXME: Get the right backend.
-    backend.update(index, current_qs)
+    try:
+        backend.update(index, current_qs)
+    except Exception as e:
+        print()
+        print(haystack_message('!! { backend.update } threw:'))
+        print('-----')
+        print(e)
+        print('-----')
+        traceback.print_stack()
+        print()
+        raise HaystackError(haystack_message('!! { backend.update } issue: {}'.format(e.message)))
 
     # Clear out the DB connections queries because it bloats up RAM.
     reset_queries()
@@ -109,6 +124,39 @@ def do_remove(backend, index, model, pks_seen, start, upper_bound, verbosity=1):
                 print("  removing %s." % result.pk)
 
             backend.remove(".".join([result.app_label, result.model_name, str(result.pk)]))
+
+
+def format_timedelta(td_object):
+    """
+    Turns a timedelta object into a string formatted such as:
+        "1 day, 3 hours, 38 minutes, 20 seconds"
+    (Adapted from http://stackoverflow.com/a/13756038)
+    """
+    seconds = int(td_object.total_seconds())
+
+    if not seconds:
+        return 'less than a second'
+
+    periods = [
+            ('year',        60*60*24*365),
+            ('month',       60*60*24*30),
+            ('day',         60*60*24),
+            ('hour',        60*60),
+            ('minute',      60),
+            ('second',      1)
+    ]
+
+    strings = []
+
+    for period_name, period_seconds in periods:
+        if seconds >= period_seconds:
+            period_value, seconds = divmod(seconds, period_seconds)
+            if period_value == 1:
+                strings.append("%s %s" % (period_value, period_name))
+            else:
+                strings.append("%s %ss" % (period_value, period_name))
+
+    return ', '.join(strings)
 
 
 class Command(LabelCommand):
@@ -156,6 +204,7 @@ class Command(LabelCommand):
         self.backends = options.get('using')
         if not self.backends:
             self.backends = haystack_connections.connections_info.keys()
+        self.logger = logging.getLogger('haystack')
 
         age = options.get('age', DEFAULT_AGE)
         start_date = options.get('start_date')
@@ -183,6 +232,8 @@ class Command(LabelCommand):
         if not items:
             items = load_apps()
 
+        self.timers = defaultdict(dict)
+
         return super(Command, self).handle(*items, **options)
 
     def handle_label(self, label, **options):
@@ -192,6 +243,51 @@ class Command(LabelCommand):
             except:
                 logging.exception("Error updating %s using %s ", label, using)
                 raise
+
+
+    def log_info(self, message, header=None, footer=None):
+        if self.verbosity < 1:
+            return
+
+        if header:
+            self.logger.info(haystack_message('{}'.format(len(message) * header)))
+        self.logger.info(haystack_message('{}'.format(message)))
+        if footer:
+            self.logger.info(haystack_message('{}'.format(len(message) * footer)))
+
+    def log_error(self, message):
+        self.logger.error(haystack_message('ERROR: {}'.format(message)))
+
+    def log_debug(self, message):
+        self.logger.debug(haystack_message('(DEBUG) {}'.format(message)))
+
+    def log_start_header(self, model_set_name):
+        self.log_start('-- Updating all {} --'.format(model_set_name), timer_name='default', header='=', footer='-')
+
+    def log_start(self, message, timer_name='default', header=None, footer=None):
+        if self.verbosity < 1:
+            return
+
+        self.timers[timer_name]['start'] = default_timer()
+
+        self.log_info(message, header=header, footer=footer)
+
+    def log_info_and_print(self, message):
+        print(haystack_message(message))
+
+        self.log_info(message)
+
+    def log_end(self, message, timer_name='default'):
+        if self.verbosity < 1:
+            return
+
+        elapsed = timedelta(seconds=(default_timer() - self.timers[timer_name]['start']))
+
+        self.log_info_and_print('{} It took {} ({:.2f}s) total.'.format(
+            message,
+            format_timedelta(elapsed),
+            elapsed.total_seconds()
+        ))
 
     def update_backend(self, label, using):
         from haystack.exceptions import NotHandled
@@ -203,12 +299,15 @@ class Command(LabelCommand):
             import multiprocessing
 
         for model in get_models(label):
+            model_set_name = model._meta.verbose_name_plural
             try:
                 index = unified_index.get_index(model)
             except NotHandled:
-                if self.verbosity >= 2:
+                if self.verbosity > 2:
                     print("Skipping '%s' - no index." % model)
                 continue
+
+            self.log_start_header(model._meta.verbose_name_plural)
 
             if self.workers > 0:
                 # workers resetting connections leads to references to models / connections getting
@@ -222,7 +321,7 @@ class Command(LabelCommand):
             total = qs.count()
 
             if self.verbosity >= 1:
-                print(u"Indexing %d %s" % (total, force_text(model._meta.verbose_name_plural)))
+                self.log_info_and_print('> Indexing {} {}...'.format(total, force_text(model_set_name)))
 
             batch_size = self.batchsize or backend.batch_size
 
@@ -241,6 +340,8 @@ class Command(LabelCommand):
                 pool = multiprocessing.Pool(self.workers)
                 pool.map(worker, ghetto_queue)
                 pool.terminate()
+
+            self.log_end('< Finished updating backend for {}.'.format(model_set_name))
 
             if self.remove:
                 # For some reason, if we don't close them all out, we find out that the connection
