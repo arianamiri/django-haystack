@@ -9,6 +9,7 @@ except ImportError:
 
 install_requires = [
     'Django',
+    'ujson'
 ]
 
 tests_require = [

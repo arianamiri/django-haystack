@@ -20,7 +20,7 @@ from haystack.utils import log as logging
 from haystack.utils import get_model_ct
 
 try:
-    import json
+    import ujson as json
 except ImportError:
     try:
         import simplejson as json
