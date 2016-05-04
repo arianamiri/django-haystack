@@ -91,7 +91,7 @@ def do_update(backend, index, qs, start, end, total, verbosity=1):
 
     if verbosity >= 2:
         if hasattr(os, 'getppid') and os.getpid() == os.getppid():
-            logger.info("  indexed {} - {} of {} in {}.  Took {}".format(start + 1, end, total, time_delta))
+            logger.info("  indexed {} - {} of {}.  Took {}".format(start + 1, end, total, time_delta))
         else:
             logger.info("  indexed {} - {} of {} (by {}).  Took {}".format(start + 1, end, total, os.getpid(), time_delta))
 
