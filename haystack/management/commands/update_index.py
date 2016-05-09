@@ -36,6 +36,8 @@ DEFAULT_AGE = None
 APP = 'app'
 MODEL = 'model'
 
+logger = logging.getLogger('haystack')
+
 
 def worker(bits):
     # We need to reset the connections, otherwise the different processes
@@ -74,6 +76,7 @@ def worker(bits):
 
 
 def do_update(backend, index, qs, start, end, total, verbosity=1):
+    start_time = now()
     # Get a clone of the QuerySet so that the cache doesn't bloat up
     # in memory. Useful when reindexing large amounts of data.
     small_cache_qs = qs.all()
@@ -81,14 +84,16 @@ def do_update(backend, index, qs, start, end, total, verbosity=1):
 
     index.pre_process_data(current_qs)
 
-    if verbosity >= 2:
-        if hasattr(os, 'getppid') and os.getpid() == os.getppid():
-            print("  indexed %s - %d of %d." % (start + 1, end, total))
-        else:
-            print("  indexed %s - %d of %d (by %s)." % (start + 1, end, total, os.getpid()))
-
     # FIXME: Get the right backend.
     backend.update(index, current_qs)
+
+    time_delta = now() - start_time
+
+    if verbosity >= 2:
+        if hasattr(os, 'getppid') and os.getpid() == os.getppid():
+            logger.info("  indexed {} - {} of {}.  Took {}".format(start + 1, end, total, time_delta))
+        else:
+            logger.info("  indexed {} - {} of {} (by {}).  Took {}".format(start + 1, end, total, os.getpid(), time_delta))
 
     # Clear out the DB connections queries because it bloats up RAM.
     reset_queries()
@@ -106,7 +111,7 @@ def do_remove(backend, index, model, pks_seen, start, upper_bound, verbosity=1):
         if not smart_bytes(result.pk) in pks_seen:
             # The id is NOT in the small_cache_qs, issue a delete.
             if verbosity >= 2:
-                print("  removing %s." % result.pk)
+                logger.info("  removing {}.".format(result.pk))
 
             backend.remove(".".join([result.app_label, result.model_name, str(result.pk)]))
 
@@ -207,7 +212,7 @@ class Command(LabelCommand):
                 index = unified_index.get_index(model)
             except NotHandled:
                 if self.verbosity >= 2:
-                    print("Skipping '%s' - no index." % model)
+                    logger.info("Skipping '{}' - no index.".format(model))
                 continue
 
             if self.workers > 0:
@@ -222,7 +227,7 @@ class Command(LabelCommand):
             total = qs.count()
 
             if self.verbosity >= 1:
-                print(u"Indexing %d %s" % (total, force_text(model._meta.verbose_name_plural)))
+                logger.info(u"Indexing {} {}".format(total, force_text(model._meta.verbose_name_plural)))
 
             batch_size = self.batchsize or backend.batch_size
 
