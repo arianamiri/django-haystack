@@ -187,7 +187,7 @@ class ElasticsearchSearchBackend(BaseSearchBackend):
         bulk_index(self.conn, prepped_docs, index=self.index_name, doc_type='modelresult')
 
         # We are explicitly eliminating the call to self.conn.indices.refresh().
-        # ElasticSearch will do an automatic refresh once per minute. Manually invoking refresh
+        # ElasticSearch will do an automatic refresh once per second. Manually invoking refresh
         # on every update triggers 1000's of unnecessary API calls.
         # The underlying issue is that neither SearchIndex.update nor SearchIndex.update_object
         # pass kwargs to this method, so setting commit to False does not solve the problem.
@@ -209,7 +209,7 @@ class ElasticsearchSearchBackend(BaseSearchBackend):
             self.conn.delete(index=self.index_name, doc_type='modelresult', id=doc_id, ignore=404)
 
             # We are explicitly eliminating the call to self.conn.indices.refresh().
-            # ElasticSearch will do an automatic refresh once per minute. Manually invoking refresh
+            # ElasticSearch will do an automatic refresh once per second. Manually invoking refresh
             # on every remove triggers 1000's of unnecessary API calls.
 
         except elasticsearch.TransportError as e:
