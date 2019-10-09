@@ -11,13 +11,6 @@ __author__ = 'Daniel Lindsley'
 __version__ = (2, 1, 1, 'dev')
 
 
-# Setup default logging.
-log = logging.getLogger('haystack')
-stream = logging.StreamHandler()
-stream.setLevel(logging.INFO)
-log.addHandler(stream)
-
-
 # Help people clean up from 1.X.
 if hasattr(settings, 'HAYSTACK_SITECONF'):
     raise ImproperlyConfigured('The HAYSTACK_SITECONF setting is no longer used & can be removed.')
